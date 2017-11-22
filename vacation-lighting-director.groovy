@@ -66,8 +66,8 @@ def pageSetup() {
 
     return dynamicPage(pageProperties) {
         section(""){
-        	paragraph image: "http://icons.iconarchive.com/icons/paomedia/small-n-flat/48/calendar-clock-icon.png",
-			"Randomly turns lights on / off during specified times to make your home appear " +
+            paragraph image: "http://icons.iconarchive.com/icons/paomedia/small-n-flat/48/calendar-clock-icon.png",
+            "Randomly turns lights on / off during specified times to make your home appear " +
                       "occupied while you're away."
         }
         section("Name (optional)") {
@@ -101,8 +101,8 @@ def Setup() {
     def frequency_minutes = [
         name:               "frequency_minutes",
         type:               "number",
-        title:              "Change lights after how many minutes? (5-180)",
-        range:              "5..180",
+        title:              "Change lights after how many minutes? (1-180)",
+        range:              "1..180",
         required:        true
     ]
 
@@ -110,6 +110,13 @@ def Setup() {
         name:               "number_of_active_lights",
         type:               "number",
         title:              "Turn on how many lights at one time?",
+        required:        true,
+    ]
+    
+    def number_of_virtual_lights = [
+        name:               "number_of_virtual_lights",
+        type:               "number",
+        title:              "How many virtual lights?",
         required:        true,
     ]
 
@@ -133,9 +140,11 @@ def Setup() {
          }
         section("Switch & interval settings (required)") {
         
-        	input switches
+            input switches
         
-        	input number_of_active_lights
+            input number_of_active_lights
+            
+            input number_of_virtual_lights
             
             input frequency_minutes
         }
@@ -359,45 +368,57 @@ def scheduleCheck(evt) {
         atomicState?.lastUpdDt = getDtNow()
         log.debug("Running")
         atomicState.Running = true
-
-        // turn off switches
-        def inactive_switches = switches
-        def vacactive_switches = []
-        if (atomicState.Running) {
-            if (atomicState?.vacactive_switches) {
-                vacactive_switches = atomicState.vacactive_switches
-                if (vacactive_switches?.size()) {
-                    for (int i = 0; i < vacactive_switches.size() ; i++) {
-                        inactive_switches[vacactive_switches[i]].off()
-                        log.trace "turned off ${inactive_switches[vacactive_switches[i]]}"
-                    }
-                }
-            }
-            atomicState.vacactive_switches = []
-        }
-
+        
         def random = new Random()
-        vacactive_switches = []
+        def inactive_switches = switches
+        def new_vacactive_switches = []
         def numlight = number_of_active_lights
         if (numlight > inactive_switches.size()) { numlight = inactive_switches.size() }
         log.trace "inactive switches: ${inactive_switches.size()} numlight: ${numlight}"
         for (int i = 0 ; i < numlight ; i++) {
 
             // grab a random switch to turn on
-            def random_int = random.nextInt(inactive_switches.size())
+            def random_int = random.nextInt(inactive_switches.size() + number_of_virtual_lights)
             while (vacactive_switches?.contains(random_int)) {
-                random_int = random.nextInt(inactive_switches.size())
+                random_int = random.nextInt(inactive_switches.size() + number_of_virtual_lights)
             }
-            vacactive_switches << random_int
+            new_vacactive_switches << random_int
         }
-        for (int i = 0 ; i < vacactive_switches.size() ; i++) {
-            inactive_switches[vacactive_switches[i]].on()
-            log.trace "turned on ${inactive_switches[vacactive_switches[i]]}"
-        }
-        atomicState.vacactive_switches = vacactive_switches
-        //log.trace "vacactive ${vacactive_switches} inactive ${inactive_switches}"
 
-    } else if(people && someoneIsHome){
+        // turn off switches
+        def vacactive_switches = []
+        if (atomicState.Running) {
+            if (atomicState?.vacactive_switches) {
+                vacactive_switches = atomicState.vacactive_switches
+                if (vacactive_switches?.size()) {
+                    for (int i = 0; i < vacactive_switches.size() ; i++) {
+                        if (vacactive_switches[i] >= inactive_switches.size()) {
+                            log.trace "turned off virtual light"
+                        } else {
+                            if (new_vacactive_switches.contains(vacactive_switches[i])) {
+                                log.trace "leaving ${inactive_switches[vacactive_switches[i]]} on to avoid flicker"
+                            } else {
+                                inactive_switches[vacactive_switches[i]].off()
+                                log.trace "turned off ${inactive_switches[vacactive_switches[i]]}"
+                            }
+                        }
+                    }
+                }
+            }
+            atomicState.vacactive_switches = []
+        }
+
+        for (int i = 0 ; i < new_vacactive_switches.size() ; i++) {
+            if (new_vacactive_switches[i] >= inactive_switches.size()) {
+                log.trace "turned on virtual light"
+            } else {
+                inactive_switches[new_vacactive_switches[i]].on()
+                log.trace "turned on ${inactive_switches[new_vacactive_switches[i]]}"
+            }
+        }
+        atomicState.vacactive_switches = new_vacactive_switches
+        log.trace "vacactive ${new_vacactive_switches} inactive ${inactive_switches}"
+    } else if (people && someoneIsHome){
         //don't turn off lights if anyone is home
         if (atomicState?.schedRunning) {
             log.debug("Someone is home! Stopping vacation lighting.")
